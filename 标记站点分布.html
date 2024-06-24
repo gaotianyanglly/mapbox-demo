@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>站点分布</title>
+    <meta
+      name="viewport"
+      content="initial-scale=1,maximum-scale=1,user-scalable=no"
+    />
+    <link
+      href="https://api.mapbox.com/mapbox-gl-js/v3.4.0/mapbox-gl.css"
+      rel="stylesheet"
+    />
+    <script src="https://api.mapbox.com/mapbox-gl-js/v3.4.0/mapbox-gl.js"></script>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100vw;
+        height: 100vh;
+      }
+      #map {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 100%;
+      }
+      .fileInputWrappers {
+        position: absolute;
+        top: 0;
+        left: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        /* flex-direction: column; */
+        height: 40px;
+        width: 200px;
+        padding: 10px;
+        border-radius: 5px;
+        border: 1px solid gray;
+        background-color: rgba(255, 255, 255, 0.6);
+      }
+      .custom-marker {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 5px;
+        background-color: #24e9c9;
+        box-shadow: -1px 3px 6px 0px #147b66; /* 水平偏移量 垂直偏移量 模糊半径 颜色 */
+      }
+      .maskLayer {
+        width: 100vw;
+        height: 100vh;
+        position: absolute;
+        left: 0;
+        top: 0;
+        display: none;
+        justify-content: center;
+        align-items: center;
+        flex-direction: column;
+        background: rgba(0, 0, 0, 0.6);
+        color: #fff;
+      }
+      .loading {
+        border: 8px solid #f3f3f3; /* Light grey */
+        border-top: 8px solid #3498db; /* Blue */
+        border-radius: 50%;
+        width: 60px;
+        height: 60px;
+        animation: spin 2s linear infinite;
+      }
+
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+
+      .fetchResultWrappers .tableWrapper {
+        border-radius: 5px;
+        border: 1px solid gray;
+        background-color: #fff;
+        padding: 10px;
+        max-height: 600px;
+        overflow-y: auto;
+        color: #000;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+      }
+      .fetchResultWrappers .tableWrapper p {
+        margin: 0 0 10px 0;
+        padding: 0;
+      }
+      .fetchResultWrappers .tableWrapper th {
+        padding: 0 10px;
+      }
+      .fetchResultWrappers .tableWrapper td {
+        text-align: center;
+      }
+      .fetchResultWrappers .tableWrapper thead {
+        border-bottom: 1px solid gray;
+      }
+      table {
+        border-bottom: 1px solid #fff;
+        padding-bottom: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <div class="fileInputWrappers">
+      <input type="file" id="fileInput" onchange="handleFile(this.files)" />
+    </div>
+    <div class="maskLayer loadingWrappers">
+      <div class="loading"></div>
+      <p>正在加载数据...</p>
+    </div>
+    <div class="maskLayer fetchResultWrappers"></div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.2/xlsx.full.min.js"></script>
+    <script>
+      // 注册新弹窗
+      class Dialog {
+        constructor(el) {
+          this.maskLayer = el;
+        }
+        show() {
+          this.maskLayer.style.display = "flex";
+        }
+
+        hide() {
+          this.maskLayer.style.display = "none";
+        }
+      }
+      const pageLoading = new Dialog(
+        document.querySelector(".loadingWrappers")
+      );
+
+      // 记录地址信息
+      var address = [];
+      // 记录excel的表格信息
+      const column = [
+        {
+          lable: "品牌",
+          value: "pp",
+        },
+        {
+          lable: "型号",
+          value: "xh",
+        },
+        {
+          lable: "功率等级",
+          value: "gldj",
+        },
+        {
+          lable: "充电桩类型",
+          value: "cdzlx",
+        },
+        {
+          lable: "计划国家",
+          value: "jhgj",
+        },
+        {
+          lable: "城市",
+          value: "city",
+          render: (row) =>
+            row.city_cn
+              ? `<strong>城市</strong>:${row.city}(${row.city_cn})<br>`
+              : `<strong>城市</strong>:${row.city}`,
+        },
+        {
+          lable: "CPO",
+          value: "CPO",
+        },
+        {
+          lable: "具体地址",
+          value: "adress",
+          render: (row) => `<strong>具体地址</strong>:<br>${row.adress}<br>`,
+        },
+      ];
+      function handleFile(files) {
+        // 获取上传的文件
+        var file = files[0];
+        var reader = new FileReader();
+        pageLoading.show();
+        reader.onload = function (e) {
+          var data = new Uint8Array(e.target.result);
+          var workbook = XLSX.read(data, { type: "array" });
+
+          // 获取第一个工作表
+          var sheetName = workbook.SheetNames[0];
+          var sheet = workbook.Sheets[sheetName];
+
+          // 将数据转换为 JSON 格式
+          var jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+          // 在控制台输出 JSON 数据
+          address = jsonData
+            .filter((item, index) => {
+              return index > 0 && item.length > 0;
+            })
+            .map((item) => {
+              let res = {
+                // 品牌
+                pp: item[0],
+                // 型号
+                xh: item[1],
+                // 功率等级
+                gldj: item[2],
+                // 充电桩类型
+                cdzlx: item[3],
+                // 计划国家
+                jhgj: item[4],
+                // 城市（英文）
+                city: item[5],
+                // 城市（中文）
+                city_cn: item[6],
+                // CPO
+                CPO: item[7],
+                // 具体地址
+                adress: item[8],
+              };
+              // 去除空字段
+              for (const key in res) {
+                if (
+                  res[key] === null ||
+                  res[key] === undefined ||
+                  res[key] === ""
+                ) {
+                  delete res[key];
+                }
+              }
+              return res;
+            });
+
+          // 获取到excel文件内容后渲染地图
+          mapboxgl.accessToken =
+            "pk.eyJ1IjoicmF1cm9vIiwiYSI6ImNsc3NnbHZkZjFrdjUya25zZmpyOHBqazgifQ.B3cpCQYL7HaNyFH2kxLOmQ";
+          var map = new mapboxgl.Map({
+            container: "map",
+            style: "mapbox://styles/rauroo/clwrefoi9013401pn3jyf9qmj", // Mapbox默认样式
+            center: [9.4465, 54.7937], // 地图中心点的经纬度
+            zoom: 10, // 初始缩放级别
+          });
+          // 用来保存标点的经纬度以计算自动缩放
+          var markers = [];
+          Promise.all(
+            address.map((item) => {
+              // 编码地址参数
+              var encodedAddress = encodeURIComponent(
+                item.city + " " + item.adress
+              );
+
+              // 使用 Mapbox 地理编码服务获取地址的经纬度
+              return fetch(
+                "https://api.mapbox.com/geocoding/v5/mapbox.places/" +
+                  encodedAddress +
+                  ".json?access_token=" +
+                  mapboxgl.accessToken
+              )
+                .then((response) => response.json())
+                .then((data) => {
+                  // 获取地址的第一个匹配结果的经纬度
+                  if (!data.features[0]) {
+                    return Object.assign(data, {
+                      success: false,
+                      originalData: item,
+                    });
+                  }
+                  var coordinates = data.features[0].geometry.coordinates;
+                  console.log(
+                    "经度：",
+                    coordinates[0] + ";" + "纬度：",
+                    coordinates[1]
+                  );
+                  markers.push({ lng: coordinates[0], lat: coordinates[1] });
+                  // 创建一个新的弹窗但不添加到地图上
+                  function getPoupMessage(row) {
+                    let _res = "";
+                    const messageArr = column;
+                    messageArr.forEach((messageItem) => {
+                      if (row[messageItem.value]) {
+                        if (messageItem.render) {
+                          _res += messageItem.render(row);
+                        } else {
+                          _res += `<strong>${messageItem.lable}</strong>:${
+                            row[messageItem.value]
+                          }<br>`;
+                        }
+                      }
+                    });
+                    return _res;
+                  }
+                  var popup = new mapboxgl.Popup({
+                    closeButton: false,
+                    closeOnClick: false,
+                  }).setHTML(getPoupMessage(item));
+                  // 在地图上添加标记
+                  // 创建自定义的 HTML 元素
+                  var el = document.createElement("div");
+                  el.className = "custom-marker";
+                  var mapMarker = new mapboxgl.Marker(el)
+                    .setPopup(popup) // 设置弹窗
+                    .setLngLat(coordinates)
+                    .setOffset([-5, -5])
+                    .addTo(map);
+                  // 添加鼠标进入和离开事件监听
+                  mapMarker
+                    .getElement()
+                    .addEventListener("mouseenter", function () {
+                      popup.addTo(map);
+                    });
+
+                  mapMarker
+                    .getElement()
+                    .addEventListener("mouseleave", function () {
+                      popup.remove();
+                    });
+
+                  // 循环遍历标记数据，创建标记并计算边界框
+                  var bounds = new mapboxgl.LngLatBounds();
+                  markers.forEach(function (marker) {
+                    // 创建标记
+                    // new mapboxgl.Marker().setLngLat([marker.lng, marker.lat]).addTo(map);
+
+                    // 将标记的经纬度添加到边界框中
+                    bounds.extend([marker.lng, marker.lat]);
+                  });
+
+                  // 根据边界框自动调整地图的视野以显示所有的标点
+                  map.fitBounds(bounds, { padding: 50 });
+                  return Object.assign(data, { success: true });
+                });
+            })
+          )
+            .then((result) => {
+              console.log(result);
+              // 隐藏loading
+              pageLoading.hide();
+              // 隐藏上传文件按钮
+              document.querySelector('.fileInputWrappers').style.display = 'none'
+              const dialogDom = document.querySelector(".fetchResultWrappers");
+              const resultDialog = new Dialog(dialogDom);
+              const successList = result.filter((resItem) => resItem.success);
+              const errList = result.filter((resItem) => !resItem.success);
+              const wrappers = document.createElement("div");
+              wrappers.classList.add("tableWrapper");
+              const resMessage = document.createElement("p");
+              resMessage.innerText = `共处理数据${result.length}条，其中查询到具体地址的数据共${successList.length}条，未查询到具体地址的共${errList.length}条。`;
+              wrappers.appendChild(resMessage);
+              if (errList.length) {
+                const errMessage = document.createElement("p");
+                errMessage.innerText = "未查询到具体地址的数据如下:";
+                wrappers.appendChild(errMessage);
+                // 生成失败结果
+                const table = document.createElement("table");
+                const thead = document.createElement("thead");
+                const tbody = document.createElement("tbody");
+                const headers = column;
+                const headerRow = document.createElement("tr");
+                headers.forEach((headerText) => {
+                  const th = document.createElement("th");
+                  th.textContent = headerText.lable;
+                  headerRow.appendChild(th);
+                });
+                thead.appendChild(headerRow);
+                // 表格内容
+                errList.forEach((item) => {
+                  const row = document.createElement("tr");
+                  headers.forEach((columnItem) => {
+                    const cell = document.createElement("td");
+                    const { originalData } = item;
+                    cell.textContent = originalData[columnItem.value]
+                      ? originalData[columnItem.value]
+                      : "";
+                    row.appendChild(cell);
+                  });
+                  tbody.appendChild(row);
+                });
+                table.appendChild(thead);
+                table.appendChild(tbody);
+                wrappers.appendChild(table);
+              }
+              // 生成确定按钮
+              const confirmBtn = document.createElement("button");
+              confirmBtn.innerText = "确定";
+              confirmBtn.addEventListener("click", () => {
+                resultDialog.hide();
+              });
+              wrappers.appendChild(confirmBtn);
+              dialogDom.appendChild(wrappers);
+              resultDialog.show();
+            })
+            .catch((error) => {
+              pageLoading.hide();
+            });
+        };
+
+        reader.readAsArrayBuffer(file);
+      }
+    </script>
+  </body>
+</html>
